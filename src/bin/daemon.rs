@@ -2,6 +2,7 @@ use std::io::Read;
 
 use bsky_sdk::{
     agent::config::{Config, FileStore},
+    rich_text::RichText,
     BskyAgent,
 };
 use dotenvy::dotenv;
@@ -21,10 +22,41 @@ struct Post {
     attachments: Option<std::path::PathBuf>, // TODO: make it enum of possible attachments
 }
 
+impl Post {
+    async fn post(self, agent: BskyAgent) -> Result<(), String> {
+        let created_at = atrium_api::types::string::Datetime::now();
+        let facets = match RichText::new_with_detect_facets(&self.content).await
+        {
+            Ok(richtext) => richtext.facets,
+            Err(e) => {
+                return Err(format!("Cannot parse richtext: {}", e));
+            }
+        };
+        let r = agent
+            .create_record(atrium_api::app::bsky::feed::post::RecordData {
+                created_at,
+                embed: None,
+                entities: None,
+                facets,
+                labels: None,
+                langs: None,
+                reply: None,
+                tags: None,
+                text: self.content,
+            })
+            .await;
+        return r.map(|_| {}).map_err(|e| e.to_string());
+    }
+}
+
 #[tokio::main]
 async fn main() {
     eprintln!("Logging in");
     let agent = login().await;
+    eprintln!(
+        "Logged in as {}",
+        agent.get_session().await.unwrap().handle.to_string()
+    );
 
     loop {
         let stdin = std::io::stdin();
@@ -33,11 +65,18 @@ async fn main() {
             .take_while(|c| c.as_ref().is_ok_and(|c| *c != 0))
             .collect::<Result<Vec<u8>, std::io::Error>>()
             .unwrap();
+        eprintln!("{:?}", input);
         let input = String::from_utf8(input).unwrap();
         let post: Post = serde_json::from_str(&input).unwrap();
-        println!("{:?}", post);
-
-        // TODO: post the thing
+        eprintln!("Posting");
+        match post.post(agent.clone()).await {
+            Ok(_) => {
+                eprintln!("Posted");
+            }
+            Err(e) => {
+                eprintln!("Cannot post: {}", e);
+            }
+        }
     }
 }
 
