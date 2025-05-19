@@ -59,6 +59,7 @@ async fn main() {
     );
 
     loop {
+        // use unix sockets
         let stdin = std::io::stdin();
         let bytes = stdin.bytes();
         let input = bytes
