@@ -303,15 +303,23 @@ async fn main() {
             .collect::<Result<Vec<u8>, std::io::Error>>()
             .unwrap();
         let input = String::from_utf8(input).unwrap();
-        let post: Post = serde_json::from_str(&input).unwrap();
+        let post: Post = match serde_json::from_str(&input) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{}", e);
+                continue;
+            }
+        };
         eprintln!("{:?}", post);
         eprintln!("Posting");
         match post.post(agent.clone()).await {
             Ok(uri) => {
                 eprintln!("Posted: {}", uri);
+                notify_success();
             }
             Err(e) => {
                 eprintln!("Cannot post: {}", e);
+                notify_failure(e);
             }
         }
     }
@@ -376,4 +384,18 @@ async fn login() -> BskyAgent {
             return agent;
         }
     };
+}
+
+fn notify_success() {
+    std::process::Command::new("notify-send")
+        .args(["-t", "2000", "Posted"])
+        .spawn()
+        .unwrap();
+}
+
+fn notify_failure(e: String) {
+    std::process::Command::new("notify-send")
+        .args(["-t", "2000", "Post failed:", &e])
+        .spawn()
+        .unwrap();
 }

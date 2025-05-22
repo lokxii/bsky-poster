@@ -39,27 +39,41 @@ fn main() {
         std::os::unix::net::UnixStream::connect(SOCKET.as_path()).unwrap();
     eprintln!("Connected to {}", SOCKET.to_str().unwrap());
 
-    let lines =
-        from_temp_file().lines().map(str::to_string).collect::<Vec<_>>();
-    let (text, images) = split_section(lines);
+    let (text, images, uri) = loop {
+        let lines =
+            from_temp_file().lines().map(str::to_string).collect::<Vec<_>>();
+        let (text, images) = split_section(lines);
 
-    let text = text.join("\n");
+        let text = text.join("\n");
+        if text.is_empty() {
+            return;
+        }
 
-    let images_count = images.len();
-    let images = images
-        .into_iter()
-        .map(|i| match i.as_str() {
-            "[clipboard]" => Ok(Image::Clipboard),
-            i if std::path::PathBuf::from(&i).is_file() => {
-                Ok(Image::Path(std::path::PathBuf::from(&i)))
+        let images_count = images.len();
+        let images = images
+            .into_iter()
+            .map(|i| match i.as_str() {
+                "[clipboard]" => Ok(Image::Clipboard),
+                i if std::path::PathBuf::from(&i).is_file() => {
+                    Ok(Image::Path(std::path::PathBuf::from(&i)))
+                }
+                _ => Err("Invalid embed".to_string()),
+            })
+            .collect::<Result<Vec<_>, _>>();
+        let mut images = match images {
+            Ok(i) => i,
+            Err(e) => {
+                notify_failure(e);
+                continue;
             }
-            _ => Err("Invalid embed".to_string()),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-        .drain(..std::cmp::min(4, images_count))
-        .collect::<Vec<_>>();
-    let uri = detect_uri(&text).unwrap();
+        };
+        let images =
+            images.drain(..std::cmp::min(4, images_count)).collect::<Vec<_>>();
+
+        let uri = detect_uri(&text).unwrap();
+
+        break (text, images, uri);
+    };
 
     let post = Post {
         text,
@@ -125,4 +139,11 @@ fn detect_uri(text: &String) -> Result<Option<String>, String> {
     }
 
     return Ok(Some(uri));
+}
+
+fn notify_failure(e: String) {
+    std::process::Command::new("notify-send")
+        .args(["-t", "2000", &e])
+        .spawn()
+        .unwrap();
 }
