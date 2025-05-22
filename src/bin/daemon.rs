@@ -288,7 +288,7 @@ async fn main() {
     }
     let listener =
         std::os::unix::net::UnixListener::bind(SOCKET.as_path()).unwrap();
-    eprintln!("Listening at /tmp/tsky-daemon.sock");
+    eprintln!("Listening at {}", SOCKET.to_str().unwrap());
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(s) => s,
@@ -319,14 +319,14 @@ async fn main() {
 
 async fn login() -> BskyAgent {
     match Config::load(&FileStore::new(SESSION_FILE.as_str())).await {
-        Ok(config) => {
-            let agent = BskyAgent::builder()
-                .config(config)
-                .build()
-                .await
-                .expect("Cannot create bsky agent from session file");
-            return agent;
-        }
+        Ok(config) => match BskyAgent::builder().config(config).build().await {
+            Ok(agent) => return agent,
+            Err(e) => {
+                eprintln!("Cannot create bsky agent from session file: {}", e);
+                std::fs::remove_file(SESSION_FILE.as_str()).unwrap();
+                return Box::pin(login()).await;
+            }
+        },
         Err(e) => {
             eprintln!(
                 "Cannot load session file {}: {}\r",
