@@ -112,7 +112,7 @@ impl Image {
         self,
         agent: BskyAgent,
     ) -> Result<atrium_api::app::bsky::embed::images::Image, String> {
-        let blob = match self {
+        let (blob, mime) = match self {
             Image::Path(path) => blob_from_path(path)?,
             Image::Clipboard => blob_from_clipboard()?,
         };
@@ -133,10 +133,29 @@ impl Image {
             .upload_blob(blob)
             .await
             .map_err(|e| e.to_string())?;
+
+        let blob = {
+            use atrium_api::types::{
+                Blob, BlobRef, TypedBlobRef, UnTypedBlobRef,
+            };
+            match blob.data.blob {
+                BlobRef::Typed(TypedBlobRef::Blob(b)) => {
+                    BlobRef::Typed(TypedBlobRef::Blob(Blob {
+                        mime_type: mime.to_string(),
+                        ..b
+                    }))
+                }
+                BlobRef::Untyped(b) => BlobRef::Untyped(UnTypedBlobRef {
+                    mime_type: mime.to_string(),
+                    ..b
+                }),
+            }
+        };
+
         return Ok(atrium_api::app::bsky::embed::images::ImageData {
             alt: String::new(),
             aspect_ratio: ar,
-            image: blob.data.blob,
+            image: blob,
         }
         .into());
     }
@@ -221,7 +240,9 @@ async fn fetch_uri(
     );
 }
 
-fn blob_from_path(path: std::path::PathBuf) -> Result<Vec<u8>, String> {
+fn blob_from_path(
+    path: std::path::PathBuf,
+) -> Result<(Vec<u8>, &'static str), String> {
     let accepted_types = ["image/jpeg", "image/png", "image/webp", "image/bmp"];
 
     let mut file = std::fs::File::open(path)
@@ -235,10 +256,10 @@ fn blob_from_path(path: std::path::PathBuf) -> Result<Vec<u8>, String> {
         return Err("Filetype not supported".to_string());
     };
 
-    return Ok(data);
+    return Ok((data, mime));
 }
 
-fn blob_from_clipboard() -> Result<Vec<u8>, String> {
+fn blob_from_clipboard() -> Result<(Vec<u8>, &'static str), String> {
     let mime_types = wl_clipboard_rs::paste::get_mime_types(
         wl_clipboard_rs::paste::ClipboardType::Regular,
         wl_clipboard_rs::paste::Seat::Unspecified,
@@ -261,7 +282,7 @@ fn blob_from_clipboard() -> Result<Vec<u8>, String> {
             let mut data = vec![];
             pipe.read_to_end(&mut data)
                 .map_err(|e| format!("Cannot read from clipboard: {}", e))?;
-            return Ok(data);
+            return Ok((data, mime));
         }
         Err(wl_clipboard_rs::paste::Error::NoSeats)
         | Err(wl_clipboard_rs::paste::Error::ClipboardEmpty)
